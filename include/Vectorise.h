@@ -18,19 +18,19 @@
 
 class PooledThread{
   private:
-    std::atomic_bool                    _busy;
-    std::atomic_bool                    _shutdown;
-    std::mutex                          _threadMtx;
-    std::mutex                          _stackMtx;
-    std::condition_variable             _cv;
+    std::atomic_bool                     _busy;
+    std::atomic_bool                     _shutdown;
+    std::mutex                           _mtx;
+    std::condition_variable              _cv;
 
     // Use a Deque so that references are not 
     // invalidated upon insertion/deletion
-    std::deque<std::function<void()>>   _workQueue;
-    std::thread                         _thread;
+    std::deque<std::function<void()>>    _workQueue;
+    std::thread                          _thread;
 
   public:
     void submit( std::function<void()>&& work );
+    void notify();
     void join();
     void waitLoop();
     PooledThread();
@@ -40,7 +40,7 @@ class PooledThread{
 
 class ThreadPool{
   private:
-    int                                nThreads;
+    const int                          nThreads;
     std::vector<PooledThread>          pool;
   
   public:
@@ -60,7 +60,11 @@ class ThreadPool{
     void run_and_wait()
     {
       for (int i=0; i<nThreads; i++)
+      {
+        // notify to start processing
+        pool[i].notify();
         pool[i].join();
+      }
     }
 
 };

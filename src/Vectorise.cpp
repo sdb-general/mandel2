@@ -2,12 +2,11 @@
 
 void PooledThread::waitLoop()
 {
-  int                   processedItems = 0;
   std::function<void()> localFunc;
   while(true)
   {
     // lock the mutex
-    std::unique_lock<std::mutex> lock( this->_threadMtx );
+    std::unique_lock<std::mutex> lock( _mtx );
 
     // wait until busy == true
     _cv.wait(
@@ -18,29 +17,11 @@ void PooledThread::waitLoop()
     if (_shutdown) break;
 
     /*
-    Loop again here. Process each element
-    in the queue one by one. If we catch
-    an out-of-range error, break and wait
-    under the cv
+    If we're here we assume the queue is 
+    full and we can bulk-process everything
     */
-    while(true)
-    {
-      try
-      {
-        localFunc = _workQueue.at( processedItems );
-      }
-      catch(...)
-      {
-        // We processed everything in the workQueue, 
-        // and ended up here. Break and wait under
-        // the condition variable.
-        break;
-      }
-
-      // no exception. Run the function
-      localFunc();
-      processedItems++;
-    }
+    for (int i=0; i<_workQueue.size(); i++)
+      _workQueue[i]();
 
     // no longer busy
     _busy = false;
@@ -53,7 +34,17 @@ void PooledThread::submit( std::function<void()>&& work )
   _workQueue.push_back( work );
 
   _busy = true;
-  this->_cv.notify_one();
+  _cv.notify_one();
+}
+
+/**
+ * Notifies that work is ready.
+ * Run through it as fast as possible
+*/
+void PooledThread::notify()
+{
+  _busy = true;
+  _cv.notify_one();
 }
 
 PooledThread::PooledThread() :
