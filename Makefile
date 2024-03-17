@@ -1,7 +1,7 @@
 .PHONY: all clean
 
 CXX       = g++-12
-CXXFLAGS += -I. --std=c++11 -g -O3 -march=native -mavx2 $(shell pkg-config --cflags sdl2)
+CXXFLAGS += -I. --std=c++14 -g -O3 -march=native -mavx2 $(shell pkg-config --cflags sdl2) -fext-numeric-literals
 LDFLAGS  += $(shell pkg-config --libs sdl2)
 LIBS     += -lpthread
 

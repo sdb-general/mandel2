@@ -1,9 +1,13 @@
 #include "include/Complex.h"
 #include "include/Globals.h"
 #include "include/Utils.h"
+#include "include/Vectorise.h"
 
 #include <immintrin.h>
-#include <emmintrin.h>
+
+#include <chrono>
+
+static ThreadPool t;
 
 void Pixels::processPixels()
 {
@@ -50,10 +54,12 @@ int Pixels::kernel(const double real, const double imag)
   SIMD version
 */
 /*=================================================================*/
-
+using namespace std::chrono_literals;
 void SimdPixels::processPixels()
 {
   StopWatch s("Process Pixels SIMD");
+
+
   // get X and Y bounds
   // we assume that the template params actually 
   // match the number of pixels we wanna process
@@ -77,10 +83,13 @@ void SimdPixels::processPixels()
     {
       double doubleY = yLow + y*dY;
 
-      // set the pixel vector inside this function
-      kernel( doubleX, doubleY, doubleY+dY, doubleY+2*dY, doubleY+3*dY, x, y );
+      t.submit(
+        [&, doubleX, doubleY, dY, x, y]()
+        { kernel( doubleX, doubleY, doubleY+dY, doubleY+2*dY, doubleY+3*dY, x, y ); }
+      );
     }
   }
+  t.run_and_wait();
 }
 
 /*
@@ -89,7 +98,6 @@ void SimdPixels::processPixels()
 */
 inline bool anyContinue( __m256d a )
 {
-  // static const __m256d zeroMask = _mm256_set_pd(0.,0.,0.,0.);
   bool output = false;
   for (size_t i=0; i<4; i++)
     output |= ( a[i] == 1.0 );
@@ -99,26 +107,26 @@ inline bool anyContinue( __m256d a )
 void SimdPixels::kernel(const double x, const double y0, const double y1, const double y2, const double y3, int pixelX, int pixelY)
 {
   // set some registers
-  __m256d real( _mm256_set_pd(  x,  x,  x,  x )), imag(_mm256_set_pd(  y0,  y1,  y2,  y3  ));
-  static const __m256d two ( _mm256_set_pd(2.0,2.0,2.0,2.0) );
-  static const __m256d four( _mm256_set_pd(4.0,4.0,4.0,4.0) );
+  __m256d real( _mm256_set1_pd(x)), imag(_mm256_set_pd(  y0,  y1,  y2,  y3  ));
+  static const __m256d two ( _mm256_set1_pd(2.0) );
+  static const __m256d four( _mm256_set1_pd(4.0) );
   __m256d zR, zI, zR2, zI2;
   __m256d twoZRtimesZI;   // intermediate variable for zI calc
   __m256d absValue; // used for checking if our abs value is maxed out yet
   __m256d iters;
-  __m256d continueToIter = _mm256_set_pd(1.,1.,1.,1.);
+  __m256d continueToIter = _mm256_set1_pd(1.);
   // __m256d increment;      // use this to 
 
-  static const __m256d maxIters = _mm256_set_pd((double)Config::Instance.getMaxIters(), (double)Config::Instance.getMaxIters(), (double)Config::Instance.getMaxIters(), (double)Config::Instance.getMaxIters() );;
-  static const __m256d oneMask  = _mm256_set_pd(1.,1.,1.,1.);
+  static const __m256d maxIters = _mm256_set1_pd( (double)Config::Instance.getMaxIters() );;
+  static const __m256d oneMask  = _mm256_set1_pd(1.);
 
   // set the registers
-  zR             = _mm256_set_pd(0.,0.,0.,0.);
-  zI             = _mm256_set_pd(0.,0.,0.,0.);
+  zR             = _mm256_set1_pd(0.);
+  zI             = _mm256_set1_pd(0.);
       
-  iters          = _mm256_set_pd(1.,1.,1.,1.);
-  absValue       = _mm256_set_pd(0.,0.,0.,0.); // check if our abs value has eceed 4
-  absValue       = _mm256_set_pd(0.,0.,0.,0.); 
+  iters          = _mm256_set1_pd(1.);
+  absValue       = _mm256_set1_pd(0.); // check if our abs value has eceed 4
+  absValue       = _mm256_set1_pd(0.); 
 
   while( anyContinue(continueToIter) )
   {
@@ -139,7 +147,7 @@ void SimdPixels::kernel(const double x, const double y0, const double y1, const 
     // check if we need to stop due to absValue exceeded
     absValue = _mm256_cmp_pd( _mm256_add_pd( zR2, zI2 ), four, _CMP_LT_OQ );
 
-    // check if we have exceeded max iterations first
+    // check if we have exceeded max iterations
     continueToIter = _mm256_cmp_pd( iters , maxIters, _CMP_LT_OQ );
 
     // perform AND on these two conditinons
@@ -149,7 +157,9 @@ void SimdPixels::kernel(const double x, const double y0, const double y1, const 
     // bits other than the ones we want
     continueToIter = _mm256_and_pd( continueToIter, oneMask );
 
-    // now we can increment
+    // now we can increment!
+    // continueToIter should have the double representation
+    // of 1.0 in every position where we wanna continue
     iters = _mm256_add_pd( iters, continueToIter );
   }
 
@@ -158,5 +168,4 @@ void SimdPixels::kernel(const double x, const double y0, const double y1, const 
   {
     _pixels[ pixelX*_yPixels + (pixelY+i) ] = (int)iters[3-i];
   }
-  
 }
