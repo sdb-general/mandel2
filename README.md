@@ -1,0 +1,1 @@
+Check out other branches to see multithreading strategies. Both could have simply implemented a "parallel for", but my goal was to try a task-like structure, hence the use of stacks to hold ```std::function``` objects.
